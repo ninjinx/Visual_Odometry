@@ -5,7 +5,7 @@ import time
 from imutils.video import FPS
 import math
 
-
+#Feature
 class Feature:
     def __init__(self, x, y, patch):
         self.x = x
