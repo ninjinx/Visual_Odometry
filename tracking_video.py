@@ -6,48 +6,6 @@ from imutils.video import FPS
 import math
 import random
 
-
-def get_scale(p1, p2, iterations=1000):
-    if p1 is None or p2 is None:
-        return None
-
-    if len(p1) <= 1 or len(p2) <= 1:
-        return None
-
-    n = min((len(p1), len(p2)))-1
-    ratio = 0
-    for i in range(iterations):
-        ind1 = random.randint(0, n)
-        ind2 = random.randint(0, n)
-        while ind2 == ind1:
-            ind2 = random.randint(0, n)
-
-        if len(np.shape(p1)) > 2:
-            d1x = p1[ind1, 0, 0]-p1[ind2, 0, 0]
-            d1y = p1[ind1, 0, 1]-p1[ind2, 0, 1]
-        else:
-            d1x = p1[ind1, 0] - p1[ind2, 0]
-            d1y = p1[ind1, 1] - p1[ind2, 1]
-        d1 = math.sqrt(d1x**2+d1y**2)
-
-        if len(np.shape(p1)) > 2:
-            d2x = p2[ind1, 0, 0] - p2[ind2, 0, 0]
-            d2y = p2[ind1, 0, 1] - p2[ind2, 0, 1]
-        else:
-            d2x = p2[ind1, 0] - p2[ind2, 0]
-            d2y = p2[ind1, 1] - p2[ind2, 1]
-        d2 = math.sqrt(d2x ** 2 + d2y ** 2)
-
-        if d1 == 0:
-            ratio += 1
-            continue
-
-        ratio += d2/d1
-
-    ratio /= iterations
-    return ratio
-
-
 def get_speed(mat):
     vx = mat[0, 0]
     vy = mat[1, 0]
@@ -70,16 +28,22 @@ def get_rotation(mat, axis=0):
     a = np.arccos(dot)
     return a
 
-dmax = 32
-dsize = 16
-min_features = 300
 
-print("[INFO] starting video stream...")
+def draw_tracks(canvas, points1, points2):
+    for i, (new, old) in enumerate(zip(points1, points2)):
+        a, b = new.ravel()
+        c, d = old.ravel()
+        canvas = cv2.line(canvas, (a, b), (c, d), (0, 255, 0), 1)
+    return canvas
+
+min_features = 80
+
 fps = FPS().start()
 
+# image dimensions
 h = 1080//2
 w = 1920//2
-features = []
+
 canvas = np.zeros((h, w, 3), dtype=np.uint8)
 path = np.zeros((h, w, 3), dtype=np.uint8)
 
@@ -103,102 +67,90 @@ feature_params = dict(maxCorners=5000,
 
 Rpos = np.eye(3, 3, dtype=np.float32)
 Tpos = np.zeros((3, 1), dtype=np.float32)
-Vpos = np.zeros((3, 1), dtype=np.float32)
-Rvpos = np.eye(3, 3, dtype=np.float32)
 
 cap = cv2.VideoCapture('VID_20171120_134746.mp4')
-ret, prev_frame = cap.read()
-prev_frame = cv2.resize(prev_frame, dsize=(w, h))
-prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
+prev_frame = None
+prev_gray = None
 
-points1 = cv2.goodFeaturesToTrack(prev_gray, mask=None, **feature_params)
-
-frame_n = 0
-
-scale = None
+keyframe_old = None
+keyframe_new = None
+keypoint_dist = 0
 
 while cap.isOpened():
     ret, frame = cap.read()
-
     if not ret:
         break
+
+    if prev_frame is None:
+        prev_frame = cv2.resize(frame, dsize=(w, h))
+        prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
+        keyframe_new = np.copy(prev_gray)
+        continue
 
     frame = cv2.resize(frame, dsize=(w, h))
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    # optical flow tracking
-    while points1 is None:
-        points1 = cv2.goodFeaturesToTrack(gray, mask=None, **feature_params)
-
+    points1 = cv2.goodFeaturesToTrack(prev_gray, mask=None, **feature_params)
     points2, status, error = cv2.calcOpticalFlowPyrLK(prev_gray, gray, points1, None, **lk_params)
-    status[error > 5.] = 0   # error rejection
-    good_new = points2[status == 1]
     good_old = points1[status == 1]
+    good_new = points2[status == 1]
 
-    # draw tracks
-    black = np.ones((h, w, 3), dtype=np.uint8)*30
-    canvas = cv2.subtract(canvas, black)
-    for i, (new, old) in enumerate(zip(good_new, good_old)):
-        a, b = new.ravel()
-        c, d = old.ravel()
-        canvas = cv2.line(canvas, (a, b), (c, d), (0, 255, 0), 1)
+    # calculate mean distance
+    mean_dist = 0
+    n = 0
+    for i, p2 in enumerate(good_new):
+        p1 = good_old[i]
 
-    frame = cv2.add(frame, canvas)
+        if p1 is None or p2 is None:
+            continue
 
-    matches = len(good_new)
+        if hasattr(p1, '__len__') is False:
+            continue
 
-    if matches < min_features:
-        #print("Finding new features.. {}".format(frame_n))
-        points1 = cv2.goodFeaturesToTrack(gray, mask=None, **feature_params)
+        if hasattr(p2, '__len__') is False:
+            continue
 
-    if matches > 7:
-        good_new = np.reshape(np.array(good_new, dtype=np.float32), (-1, 1, 2))
-        #good_new = cv2.undistortPoints(good_new, cam_mat, dist_coeff)
-        good_old = np.reshape(np.array(good_old, dtype=np.float32), (-1, 1, 2))
-        #good_old = cv2.undistortPoints(good_old, cam_mat, dist_coeff)
-        #E, mask = cv2.findEssentialMat(good_new, good_old, cam_mat, method=cv2.RANSAC, prob=0.999, threshold=1.0)
-        E, mask = cv2.findEssentialMat(good_new, good_old,
-                                       cameraMatrix=cam_mat, method=cv2.RANSAC, prob=0.999, threshold=1.0, mask=None)
-        points, R, T, newmask = cv2.recoverPose(E, good_new, good_old, cameraMatrix=cam_mat, mask=mask)
+        if len(p1) <= 1 or len(p2) <= 1:
+            continue
 
-        if np.rad2deg(get_rotation(R)-get_rotation(Rvpos)) < 3.:
-            Vpos = T
-            Rvpos = R
+        dx = float(p1[0]) - float(p2[0])
+        dy = float(p1[1]) - float(p2[1])
+        mean_dist += math.sqrt(dx ** 2 + dy ** 2)
+        n += 1
 
-    new_scale = get_scale(good_old, good_new)
-    if scale is None:
-        if new_scale is not None:
-            scale = new_scale
-        else:
-            scale = 1.
-    elif new_scale is not None:
-            scale *= new_scale
-    print(scale)
-    old_pos = np.array(Tpos)
-    Tpos = Tpos + scale*np.dot(Rpos, Vpos)
-    Rpos = np.dot(Rvpos, Rpos)
+    if n > 0:
+        mean_dist /= n
+        keypoint_dist += mean_dist
 
-    x1 = int(old_pos[0, 0]*5+w/2)
-    y1 = int(old_pos[1, 0]*5+h/2)
-    x2 = int(Tpos[0, 0]*5+w/2)
-    y2 = int(Tpos[1, 0]*5+h/2)
-    cv2.line(path, (x1, y1), (x2, y2), (0, 255, 0), 1)
-    # draw view vector
-    # v = np.array([[0.], [0.], [1.]], dtype=np.float32)
-    # v = np.dot(Rpos, v)
-    # path = np.zeros((h, w, 3), dtype=np.uint8)
-    # cv2.line(path, (int(w/3), int(h / 2)),
-    #                (int(w/3 + v[1][0]*128), int(h / 2 + v[2][0]*128)), (0, 255, 0), 1)
-    #
-    # cv2.line(path, (int(2*w / 3), int(h / 2)),
-    #          (int(2*w / 3 + v[0][0] * 128), int(h / 2 + v[2][0] * 128)), (0, 255, 0), 1)
+    if keypoint_dist > 64:  # TODO change to variable
+        keypoint_dist = 0
+        keyframe_old = np.copy(keyframe_new)
+        keyframe_new = np.copy(gray)
 
-    #print("{}, {}, {}".format(Tpos[0, 0], Tpos[1, 0], Tpos[2, 0]))
-    #print(np.dot(Rpos, np.transpose(np.array([1., 0., 0.], dtype=np.float32))))
+        points1 = cv2.goodFeaturesToTrack(keyframe_old, mask=None, **feature_params)
+        points2, status, error = cv2.calcOpticalFlowPyrLK(keyframe_old, keyframe_new, points1, None, **lk_params)
+        good_old = points1[status == 1]
+        good_new = points2[status == 1]
+
+        if len(good_new) > 7:
+            good_new = np.reshape(np.array(good_new, dtype=np.float32), (-1, 1, 2))
+            good_old = np.reshape(np.array(good_old, dtype=np.float32), (-1, 1, 2))
+            E, mask = cv2.findEssentialMat(good_new, good_old,
+                                           cameraMatrix=cam_mat, method=cv2.RANSAC, prob=0.999, threshold=1.0, mask=None)
+            points, R, T, newmask = cv2.recoverPose(E, good_new, good_old, cameraMatrix=cam_mat, mask=mask)
+
+            old_pos = np.array(Tpos)
+            Tpos = Tpos + np.dot(Rpos, T)
+            Rpos = np.dot(R, Rpos)
+
+            x1 = int(old_pos[0, 0] * 5 + w / 2)
+            y1 = int(old_pos[1, 0] * 5 + h / 2)
+            x2 = int(Tpos[0, 0] * 5 + w / 2)
+            y2 = int(Tpos[1, 0] * 5 + h / 2)
+            cv2.line(path, (x1, y1), (x2, y2), (0, 255, 0), 1)
 
     prev_gray = gray.copy()
 
-    # show the output frame
     frame = cv2.add(frame, canvas)
     cv2.imshow("Canvas", canvas)
     cv2.imshow("Frame", frame)
@@ -220,13 +172,11 @@ while cap.isOpened():
 
     # update the FPS counter
     fps.update()
-    frame_n += 1
 
 # stop the timer and display FPS information
 fps.stop()
 print("[INFO] elapsed time: {:.2f}".format(fps.elapsed()))
 print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
-
 # do a bit of cleanup
 cv2.destroyAllWindows()
 cap.release()
