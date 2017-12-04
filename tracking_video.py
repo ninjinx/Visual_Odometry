@@ -6,6 +6,7 @@ from imutils.video import FPS
 import math
 import random
 
+
 def get_speed(mat):
     vx = mat[0, 0]
     vy = mat[1, 0]
@@ -60,10 +61,12 @@ lk_params = dict(winSize=(15, 15),
                  criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
 
 # params for ShiTomasi corner detection
-feature_params = dict(maxCorners=5000,
-                      qualityLevel=0.3,
-                      minDistance=7,
-                      blockSize=7)
+feature_params = dict(maxCorners=8000,
+                      qualityLevel=0.01,
+                      minDistance=10,
+                      blockSize=3,
+                      useHarrisDetector=False,
+                      k=0.04)
 
 Rpos = np.eye(3, 3, dtype=np.float32)
 Tpos = np.zeros((3, 1), dtype=np.float32)
@@ -75,8 +78,16 @@ prev_gray = None
 keyframe_old = None
 keyframe_new = None
 keypoint_dist = 0
+frames = 0
+keyframes = 0
+
+detector = cv2.BRISK_create()
+norm = cv2.NORM_HAMMING
+matcher = cv2.BFMatcher(norm)
 
 while cap.isOpened():
+    frames += 1
+
     ret, frame = cap.read()
     if not ret:
         break
@@ -122,7 +133,8 @@ while cap.isOpened():
         mean_dist /= n
         keypoint_dist += mean_dist
 
-    if keypoint_dist > 64:  # TODO change to variable
+    if keypoint_dist > 20:  # TODO change to variable
+        keyframes += 1
         keypoint_dist = 0
         keyframe_old = np.copy(keyframe_new)
         keyframe_new = np.copy(gray)
@@ -131,6 +143,11 @@ while cap.isOpened():
         points2, status, error = cv2.calcOpticalFlowPyrLK(keyframe_old, keyframe_new, points1, None, **lk_params)
         good_old = points1[status == 1]
         good_new = points2[status == 1]
+
+        fade = np.ones((h, w, 3), dtype=np.uint8)*30
+        canvas = np.zeros((h, w, 3), dtype=np.uint8)
+        canvas = draw_tracks(canvas, good_old, good_new)
+        print(len(good_new))
 
         if len(good_new) > 7:
             good_new = np.reshape(np.array(good_new, dtype=np.float32), (-1, 1, 2))
@@ -149,12 +166,13 @@ while cap.isOpened():
             y2 = int(Tpos[1, 0] * 5 + h / 2)
             cv2.line(path, (x1, y1), (x2, y2), (0, 255, 0), 1)
 
-    prev_gray = gray.copy()
+            # show result
+            frame = cv2.add(frame, canvas)
+            cv2.imshow("Canvas", canvas)
+            cv2.imshow("path", path)
+            cv2.imshow("Frame", frame)
 
-    frame = cv2.add(frame, canvas)
-    cv2.imshow("Canvas", canvas)
-    cv2.imshow("Frame", frame)
-    cv2.imshow("path", path)
+    prev_gray = gray.copy()
     key = cv2.waitKey(1) & 0xFF
 
     if key == ord("a"):
@@ -177,6 +195,8 @@ while cap.isOpened():
 fps.stop()
 print("[INFO] elapsed time: {:.2f}".format(fps.elapsed()))
 print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
+print(frames)
+print(keyframes)
 # do a bit of cleanup
 cv2.destroyAllWindows()
 cap.release()
