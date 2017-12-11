@@ -72,8 +72,41 @@ def update_motion(points1, points2, Rp, Tp, scale=1.0):
     return Rp, Tp
 
 
+def draw_path(cnv, points, R, rotate=True, drawVector=True, scale=0.1):
+    dim = np.shape(cnv)
+    cnv_h = dim[0]
+    cnv_w = dim[1]
+
+    #clear canvas
+    cnv = np.zeros(dim, dtype=np.uint8)
+
+    pos_final = points[-1]
+    x_final = pos_final[0, 0]
+    y_final = pos_final[1, 0]
+
+    for i, p2 in enumerate(points):
+        if i == 0:
+            continue
+        p1 = points[i-1]
+        x1 = int((p1[0, 0] - x_final) * scale + cnv_w / 2)
+        y1 = int((p1[1, 0] - y_final) * scale + cnv_h / 2)
+        x2 = int((p2[0, 0] - x_final) * scale + cnv_w / 2)
+        y2 = int((p2[1, 0] - y_final) * scale + cnv_h / 2)
+        cv2.line(cnv, (x1, y1), (x2, y2), (0, 255, 0), 1)
+
+    if drawVector is True:
+        vec = np.transpose(np.array([0., -1., 0.], dtype=np.float32))
+        vec = np.dot(R, vec)
+        print(vec)
+        cv2.line(cnv, (cnv_w//2, cnv_h//2),
+                 (int(16*vec[0]+cnv_w/2), int(16*vec[1]+cnv_h/2)),
+                 (255, 255, 255), 1)
+
+    return cnv
+
+
 min_features = 300
-max_dist = 80
+max_dist = 25
 
 fps = FPS().start()
 
@@ -82,7 +115,6 @@ h = 1080//2
 w = 1920//2
 
 canvas = np.zeros((h, w, 3), dtype=np.uint8)
-path = np.zeros((h, w, 3), dtype=np.uint8)
 
 # calibrated camera parameters
 cam_mat = np.array([[949.38174439, 0., 479.90568209],
@@ -118,6 +150,8 @@ new_points = []
 
 keypoints = []
 
+path = []
+
 while cap.isOpened():
     ret, frame = cap.read()
     if not ret:
@@ -138,11 +172,8 @@ while cap.isOpened():
             Rpos, Tpos = update_motion(new_points, keypoints, Rpos, Tpos, scale=keypoint_dist)
 
             #draw path
-            x1 = int(old_pos[0, 0] * (3/32) + w / 2)
-            y1 = int(old_pos[1, 0] * (3/32) + h / 2)
-            x2 = int(Tpos[0, 0] * (3/32) + w / 2)
-            y2 = int(Tpos[1, 0] * (3/32) + h / 2)
-            cv2.line(path, (x1, y1), (x2, y2), (0, 255, 0), 1)
+            path.append(Tpos)
+            canvas = draw_path(canvas, path, Rpos)
 
         # select new keypoints
         keypoint_dist = 0
@@ -155,11 +186,8 @@ while cap.isOpened():
             Rpos, Tpos = update_motion(new_points, keypoints, Rpos, Tpos, scale=keypoint_dist)
 
             # draw path
-            x1 = int(old_pos[0, 0] * (3/32) + w / 2)
-            y1 = int(old_pos[1, 0] * (3/32) + h / 2)
-            x2 = int(Tpos[0, 0] * (3/32) + w / 2)
-            y2 = int(Tpos[1, 0] * (3/32) + h / 2)
-            cv2.line(path, (x1, y1), (x2, y2), (0, 255, 0), 1)
+            path.append(Tpos)
+            canvas = draw_path(canvas, path, Rpos)
 
         # select new keypoints
         keypoint_dist = 0
@@ -191,11 +219,8 @@ while cap.isOpened():
                 Rpos, Tpos = update_motion(new_points, keypoints, Rpos, Tpos, scale=keypoint_dist)
 
                 # draw path
-                x1 = int(old_pos[0, 0] * (3/32) + w / 2)
-                y1 = int(old_pos[1, 0] * (3/32) + h / 2)
-                x2 = int(Tpos[0, 0] * (3/32) + w / 2)
-                y2 = int(Tpos[1, 0] * (3/32) + h / 2)
-                cv2.line(path, (x1, y1), (x2, y2), (0, 255, 0), 1)
+                path.append(Tpos)
+                canvas = draw_path(canvas, path, Rpos)
 
             # select new keypoints
             keypoint_dist = 0
@@ -213,11 +238,11 @@ while cap.isOpened():
 
     keypoint_dist += get_mean_distance_2d(old_points, new_points)
 
-    frame = draw_tracks(frame, old_points, new_points)
+    frame = draw_tracks(frame, keypoints, new_points)
     cv2.line(frame, (0, h // 2), (w, h // 2), (255, 0, 0), 1)
     cv2.line(frame, (w // 2, 0), (w // 2, h), (255, 0, 0), 1)
     cv2.imshow("Frame", frame)
-    cv2.imshow("Path", path)
+    cv2.imshow("Path", canvas)
 
     prev_gray = gray.copy()
     key = cv2.waitKey(1) & 0xFF
