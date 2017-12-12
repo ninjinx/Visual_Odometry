@@ -188,6 +188,8 @@ fps = FPS().start()
 h = 580
 w = 752
 
+min_features = 600
+
 canvas = np.zeros((h, w, 3), dtype=np.uint8)
 
 # calibrated camera parameters
@@ -222,7 +224,7 @@ path = []
 
 # *** READ LOG *** #
 logdir = './data/logs'
-filename = 'LOG171211_131521.csv'
+filename = 'LOG171212_135705.csv'
 file = open('/'.join((logdir, filename)), 'r')
 logreader = csv.reader(file, delimiter=' ')
 
@@ -239,7 +241,7 @@ for i, row in enumerate(logreader):
         data.append(numrow)
 
 # *** READ FILENAMES *** #
-imgdir = './data/images/flyover2'
+imgdir = './data/images/flyover3'
 filename = '*.bmp'
 images = []
 filenames = []
@@ -301,6 +303,31 @@ for frame_num, frame in enumerate(images):
     old_points = old_points[status == 1]
     new_points = new_points[status == 1]
 
+    # remove outliers
+    deltas = np.zeros(np.shape(old_points), dtype=np.float32)
+    for i, p1 in enumerate(old_points):
+        p2 = new_points[i]
+        deltas[i] = np.subtract(p2, p1)
+
+    mdx = np.median(deltas[:, 0], overwrite_input=False)
+    mdy = np.median(deltas[:, 1], overwrite_input=False)
+    mx = np.mean(deltas[:, 0])
+    my = np.mean(deltas[:, 1])
+    mlength = math.sqrt((mdx - mx) ** 2 + (mdy - my) ** 2)
+    thres = 1.5 * mlength
+    inliers = np.ones(len(deltas), dtype=np.uint8)
+    for i, d in enumerate(deltas):
+        dx = d[0] - mdx
+        dy = d[1] - mdy
+        e = math.sqrt(dx ** 2 + dy ** 2)
+        if e > thres:
+            inliers[i] = 0
+
+    if np.sum(inliers) > min_features:
+        deltas = deltas[inliers == 1]
+        old_points = old_points[inliers == 1]
+        new_points = new_points[inliers == 1]
+
     old_pos = np.copy(Tpos)  # copy old position for drawing of path
     delta = np.subtract(pose[frame_num], pose[frame_num - 1])
     speed = get_speed(delta)
@@ -339,4 +366,5 @@ fps.stop()
 print("[INFO] elapsed time: {:.2f}".format(fps.elapsed()))
 print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
 # do a bit of cleanup
+cv2.waitKey(0)
 cv2.destroyAllWindows()
