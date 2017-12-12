@@ -36,7 +36,7 @@ def filename2unixtime(fn, houroffset=0):
 
 # *** READ LOG *** #
 logdir = './data/logs'
-filename = 'LOG171211_131521.csv'
+filename = 'LOG171211_113343.csv'
 file = open('/'.join((logdir, filename)), 'r')
 logreader = csv.reader(file, delimiter=' ')
 
@@ -53,7 +53,7 @@ for i, row in enumerate(logreader):
         data.append(numrow)
 
 # *** READ FILENAMES *** #
-imgdir = './data/images/flyover2'
+imgdir = './data/images/flyover1'
 filename = '*.bmp'
 images = []
 filenames = []

@@ -40,8 +40,5 @@ for fname in images:
 
 cv2.destroyAllWindows()
 ret, cam_mat, distcoeff, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, imshape[::-1], None, None)
-#print(ret)
 print(cam_mat)
 print(distcoeff)
-#print(rvecs)
-#print(tvecs)
