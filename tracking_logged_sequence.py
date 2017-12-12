@@ -102,8 +102,7 @@ def update_motion(points1, points2, Rp, Tp, scale=1.0):
     return Rp, Tp
 
 
-def draw_path(cnv, points, R, rotate=0,
-              drawVector=True,
+def draw_path(cnv, points, rotate=0,
               scale=0.1,
               clear=True,
               color=(255, 255, 255),
@@ -130,26 +129,19 @@ def draw_path(cnv, points, R, rotate=0,
         for i, p in enumerate(points):
             points[i] = [p[0], -p[1], p[2]]
 
-    pos_final = points[-1]
-    x_final = pos_final[0]
-    y_final = pos_final[1]
+    pos_orig = points[0]
+    x_orig = pos_orig[0]
+    y_orig = pos_orig[1]
 
     for i, p2 in enumerate(points):
         if i == 0:
             continue
         p1 = points[i-1]
-        x1 = int((p1[0] - x_final) * scale + cnv_w / 2)
-        y1 = int((p1[1] - y_final) * scale + cnv_h / 2)
-        x2 = int((p2[0] - x_final) * scale + cnv_w / 2)
-        y2 = int((p2[1] - y_final) * scale + cnv_h / 2)
+        x1 = int((p1[0] - x_orig) * scale + cnv_w / 2)
+        y1 = int((p1[1] - y_orig) * scale + cnv_h / 2)
+        x2 = int((p2[0] - x_orig) * scale + cnv_w / 2)
+        y2 = int((p2[1] - y_orig) * scale + cnv_h / 2)
         cv2.line(cnv, (x1, y1), (x2, y2), color, 1)
-
-    if drawVector is True:
-        vec = np.transpose(np.array([0., -1., 0.], dtype=np.float32))
-        vec = np.dot(R, vec)
-        cv2.line(cnv, (cnv_w//2, cnv_h//2),
-                 (int(16*vec[0]+cnv_w/2), int(16*vec[1]+cnv_h/2)),
-                 (255, 255, 255), 1)
 
     return cnv
 
@@ -307,20 +299,18 @@ for frame_num, frame in enumerate(images):
     deltas = np.zeros(np.shape(old_points), dtype=np.float32)
     for i, p1 in enumerate(old_points):
         p2 = new_points[i]
-        deltas[i] = np.subtract(p2, p1)
+        s = np.subtract(p2, p1)
+        # normalize deltas
+        m = math.sqrt(s[0] ** 2 + s[1] ** 2)
+        deltas[i] = [s[0] / m, s[1] / m]
 
     mdx = np.median(deltas[:, 0], overwrite_input=False)
     mdy = np.median(deltas[:, 1], overwrite_input=False)
-    mx = np.mean(deltas[:, 0])
-    my = np.mean(deltas[:, 1])
-    mlength = math.sqrt((mdx - mx) ** 2 + (mdy - my) ** 2)
-    thres = 1.5 * mlength
+    thres = 0.9
     inliers = np.ones(len(deltas), dtype=np.uint8)
     for i, d in enumerate(deltas):
-        dx = d[0] - mdx
-        dy = d[1] - mdy
-        e = math.sqrt(dx ** 2 + dy ** 2)
-        if e > thres:
+        ddot = d[0] * mdx + d[1] * mdy
+        if ddot < thres:
             inliers[i] = 0
 
     if np.sum(inliers) > min_features:
@@ -331,16 +321,15 @@ for frame_num, frame in enumerate(images):
     old_pos = np.copy(Tpos)  # copy old position for drawing of path
     delta = np.subtract(pose[frame_num], pose[frame_num - 1])
     speed = get_speed(delta)
-    Rpos, Tpos = update_motion(new_points, old_points, Rpos, Tpos, scale=speed)
+    _, Tpos = update_motion(new_points, old_points, Rpos, Tpos, scale=speed)
 
     # draw path
     path.append(Tpos)
-    canvas = draw_path(canvas, path, Rpos, scale=0.6, clear=True, color=(0, 255, 0))
-    canvas = draw_path(canvas, pose[0:frame_num], None,
+    canvas = draw_path(canvas, path, scale=0.6, clear=True, color=(0, 255, 0))
+    canvas = draw_path(canvas, pose[0:frame_num],
                        rotate=1,
                        scale=0.6,
                        clear=False,
-                       drawVector=False,
                        color=(255, 0, 0),
                        flipX=True)
 
