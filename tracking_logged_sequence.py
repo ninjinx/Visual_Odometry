@@ -1,10 +1,7 @@
 import numpy as np
 import cv2
-import os
-import time
 from imutils.video import FPS
 import math
-import random
 import csv
 import glob
 from datetime import datetime
