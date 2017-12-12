@@ -105,27 +105,47 @@ def update_motion(points1, points2, Rp, Tp, scale=1.0):
     return Rp, Tp
 
 
-def draw_path(cnv, points, R, rotate=True, drawVector=True, scale=0.1):
+def draw_path(cnv, points, R, rotate=0,
+              drawVector=True,
+              scale=0.1,
+              clear=True,
+              color=(255, 255, 255),
+              flipX=False,
+              flipY=False):
+    points = np.reshape(points, (-1, 3))
     dim = np.shape(cnv)
     cnv_h = dim[0]
     cnv_w = dim[1]
 
     #clear canvas
-    cnv = np.zeros(dim, dtype=np.uint8)
+    if clear:
+        cnv = np.zeros(dim, dtype=np.uint8)
+
+    for n in range(rotate):
+        for i, p in enumerate(points):
+            points[i] = [-p[1], p[0], p[2]]
+
+    if flipX:
+        for i, p in enumerate(points):
+            points[i] = [-p[0], p[1], p[2]]
+
+    if flipY:
+        for i, p in enumerate(points):
+            points[i] = [p[0], -p[1], p[2]]
 
     pos_final = points[-1]
-    x_final = pos_final[0, 0]
-    y_final = pos_final[1, 0]
+    x_final = pos_final[0]
+    y_final = pos_final[1]
 
     for i, p2 in enumerate(points):
         if i == 0:
             continue
         p1 = points[i-1]
-        x1 = int((p1[0, 0] - x_final) * scale + cnv_w / 2)
-        y1 = int((p1[1, 0] - y_final) * scale + cnv_h / 2)
-        x2 = int((p2[0, 0] - x_final) * scale + cnv_w / 2)
-        y2 = int((p2[1, 0] - y_final) * scale + cnv_h / 2)
-        cv2.line(cnv, (x1, y1), (x2, y2), (0, 255, 0), 1)
+        x1 = int((p1[0] - x_final) * scale + cnv_w / 2)
+        y1 = int((p1[1] - y_final) * scale + cnv_h / 2)
+        x2 = int((p2[0] - x_final) * scale + cnv_w / 2)
+        y2 = int((p2[1] - y_final) * scale + cnv_h / 2)
+        cv2.line(cnv, (x1, y1), (x2, y2), color, 1)
 
     if drawVector is True:
         vec = np.transpose(np.array([0., -1., 0.], dtype=np.float32))
@@ -205,7 +225,7 @@ path = []
 
 # *** READ LOG *** #
 logdir = './data/logs'
-filename = 'LOG171211_113343.csv'
+filename = 'LOG171211_131521.csv'
 file = open('/'.join((logdir, filename)), 'r')
 logreader = csv.reader(file, delimiter=' ')
 
@@ -222,7 +242,7 @@ for i, row in enumerate(logreader):
         data.append(numrow)
 
 # *** READ FILENAMES *** #
-imgdir = './data/images/flyover1'
+imgdir = './data/images/flyover2'
 filename = '*.bmp'
 images = []
 filenames = []
@@ -270,11 +290,15 @@ for frame_num, frame in enumerate(images):
         prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
         continue
 
+    print(frame_num)
+    # if frame_num > 40:
+    #     break
+
     frame = cv2.resize(frame, dsize=(w, h))
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     # select new keypoints
-    old_points = find_features(prev_gray, feature_params, divisions=2)
+    old_points = find_features(prev_gray, feature_params, divisions=4)
 
     new_points, status, error = cv2.calcOpticalFlowPyrLK(prev_gray, gray, old_points, None, **lk_params)
     old_points = old_points[status == 1]
@@ -283,12 +307,18 @@ for frame_num, frame in enumerate(images):
     old_pos = np.copy(Tpos)  # copy old position for drawing of path
     delta = np.subtract(pose[frame_num], pose[frame_num - 1])
     speed = get_speed(delta)
-    print(speed)
     Rpos, Tpos = update_motion(new_points, old_points, Rpos, Tpos, scale=speed)
 
     # draw path
     path.append(Tpos)
-    canvas = draw_path(canvas, path, Rpos, scale=0.6)
+    canvas = draw_path(canvas, path, Rpos, scale=0.6, clear=True, color=(0, 255, 0))
+    canvas = draw_path(canvas, pose[0:frame_num], None,
+                       rotate=1,
+                       scale=0.6,
+                       clear=False,
+                       drawVector=False,
+                       color=(255, 0, 0),
+                       flipX=True)
 
     # draw tracks
     frame = draw_tracks(frame, old_points, new_points)
