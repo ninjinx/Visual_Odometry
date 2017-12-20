@@ -67,8 +67,22 @@ def get_rotation(mat, axis=0):
     return a
 
 
-def draw_tracks(canvas, points1, points2):
-    for i, (new, old) in enumerate(zip(points1, points2)):
+def draw_tracks(canvas, points1, points2, mask=None):
+    if mask is None:
+        points1_in = points1
+        points2_in = points2
+    else:
+        points1_in = points1[inliers == 1]
+        points2_in = points2[inliers == 1]
+        points1_out = points1[inliers == 0]
+        points2_out = points2[inliers == 0]
+
+        for i, (new, old) in enumerate(zip(points1_out, points2_out)):
+            a, b = new.ravel()
+            c, d = old.ravel()
+            canvas = cv2.line(canvas, (a, b), (c, d), (0, 0, 255), 2)
+
+    for i, (new, old) in enumerate(zip(points1_in, points2_in)):
         a, b = new.ravel()
         c, d = old.ravel()
         canvas = cv2.line(canvas, (a, b), (c, d), (0, 255, 0), 1)
@@ -204,7 +218,7 @@ def draw_point_cloud(cnv, points, clear=True, scale=1.0):
     return cnv
 
 
-csv_file = open('pointcloud_new.csv', 'w')
+csv_file = open('pointcloud_fixed.csv', 'w')
 
 fps = FPS().start()
 
@@ -226,8 +240,7 @@ dist_coeff = np.array((-0.422318028, 0.495478798, 0.00205497237, 0.0000627845968
 # Parameters for lucas kanade optical flow
 lk_params = dict(winSize=(15, 15),
                  maxLevel=2,
-                 criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03),
-                 minEigThreshold=1e-2)
+                 criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
 
 # params for ShiTomasi corner detection
 feature_params = dict(maxCorners=2000,
@@ -312,6 +325,8 @@ for frame_num, frame in enumerate(images):
         prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
         continue
 
+    print('Frame number {}:'.format(frame_num))
+
     frame = cv2.resize(frame, dsize=(w, h))
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -327,24 +342,22 @@ for frame_num, frame in enumerate(images):
     delta = np.subtract(pose[frame_num], pose[frame_num - 1])
     speed = get_speed(delta)
 
+    # remove outliers
     deltas = np.zeros(np.shape(old_points), dtype=np.float32)
     for i, p1 in enumerate(old_points):
         p2 = new_points[i]
         s = np.subtract(p2, p1)
-        deltas[i] = s
+        # normalize deltas
+        m = math.sqrt(s[0] ** 2 + s[1] ** 2)
+        deltas[i] = [s[0] / m, s[1] / m]
 
     mdx = np.median(deltas[:, 0], overwrite_input=False)
     mdy = np.median(deltas[:, 1], overwrite_input=False)
-    mx = np.mean(deltas[:, 0])
-    my = np.mean(deltas[:, 1])
-    mlength = math.sqrt((mdx - mx)**2 + (mdy - my)**2)
-    thres = mlength * 1.8
+    thres = 0.9
     inliers = np.ones(len(deltas), dtype=np.uint8)
     for i, d in enumerate(deltas):
-        ex = d[0]-mdx
-        ey = d[1]-mdy
-        e = math.sqrt(ex**2+ey**2)
-        if e > thres:
+        ddot = d[0] * mdx + d[1] * mdy
+        if ddot < thres:
             inliers[i] = 0
 
     if np.sum(inliers) > min_features:
@@ -356,7 +369,7 @@ for frame_num, frame in enumerate(images):
     if speed > 4.0:
         # set up camera projection matrices
         R = np.array([[0, 1, 0],
-             [-1, 0, 0],
+             [1, 0, 0],
              [0, 0, 1]], dtype=np.float32)
         T1 = np.reshape(pose[frame_num - 1], (3, 1))
         T2 = np.reshape(pose[frame_num], (3, 1))
@@ -378,7 +391,7 @@ for frame_num, frame in enumerate(images):
         points3D = np.transpose(points3D)
         for p in points3D:
             x, y, z = p
-            if z > 800 or z < 660:
+            if z < -800 or z > -660:
                 continue
             csv_file.write('{0:f}, {1:f}, {2:f}\n'.format(x, y, z))
 
@@ -398,17 +411,17 @@ for frame_num, frame in enumerate(images):
     # draw tracks
     frame = draw_tracks(frame, old_points, new_points)
 
-    cv2.line(frame, (0, h // 2), (w, h // 2), (255, 0, 0), 1)
-    cv2.line(frame, (w // 2, 0), (w // 2, h), (255, 0, 0), 1)
-    cv2.line(frame, (0, h // 4), (w, h // 4), (255, 0, 0), 1)
-    cv2.line(frame, (w // 4, 0), (w // 4, h), (255, 0, 0), 1)
-    cv2.line(frame, (0, 3 * h // 4), (w, 3 * h // 4), (255, 0, 0), 1)
-    cv2.line(frame, (3 * w // 4, 0), (3 * w // 4, h), (255, 0, 0), 1)
+    # cv2.line(frame, (0, h // 2), (w, h // 2), (255, 0, 0), 1)
+    # cv2.line(frame, (w // 2, 0), (w // 2, h), (255, 0, 0), 1)
+    # cv2.line(frame, (0, h // 4), (w, h // 4), (255, 0, 0), 1)
+    # cv2.line(frame, (w // 4, 0), (w // 4, h), (255, 0, 0), 1)
+    # cv2.line(frame, (0, 3 * h // 4), (w, 3 * h // 4), (255, 0, 0), 1)
+    # cv2.line(frame, (3 * w // 4, 0), (3 * w // 4, h), (255, 0, 0), 1)
     cv2.imshow("Frame", frame)
     cv2.imshow("Path", canvas)
 
     prev_gray = gray.copy()
-    key = cv2.waitKey(100) & 0xFF
+    key = cv2.waitKey(1) & 0xFF
 
     if key == ord("q"):
         break
@@ -418,7 +431,6 @@ for frame_num, frame in enumerate(images):
 
 # stop the timer and display FPS information
 fps.stop()
-cv2.waitKey(0)
 print("[INFO] elapsed time: {:.2f}".format(fps.elapsed()))
 print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
 # do a bit of cleanup

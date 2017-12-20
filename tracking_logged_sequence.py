@@ -5,6 +5,7 @@ import math
 import csv
 import glob
 from datetime import datetime
+import csv
 
 
 def filename2unixtime(fn, houroffset=0):
@@ -94,7 +95,7 @@ def update_motion(points1, points2, Rp, Tp, scale=1.0):
     p1 = np.reshape(np.array(points1, dtype=np.float32), (-1, 1, 2))
     p2 = np.reshape(np.array(points2, dtype=np.float32), (-1, 1, 2))
     E, mask = cv2.findEssentialMat(p1, p2,
-                                   cameraMatrix=cam_mat, method=cv2.RANSAC, prob=0.999, threshold=1.0, mask=None)
+                                   cameraMatrix=cam_mat, method=cv2.LMEDS, prob=0.999, threshold=1.0, mask=None)
     points, R, T, newmask = cv2.recoverPose(E, p1, p2, cameraMatrix=cam_mat, mask=mask)
 
     Tp = Tp + np.dot(R, T)*scale
@@ -193,7 +194,7 @@ dist_coeff = np.array((-0.422318028, 0.495478798, 0.00205497237, 0.0000627845968
 # Parameters for lucas kanade optical flow
 lk_params = dict(winSize=(15, 15),
                  maxLevel=2,
-                 criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
+                 criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
 
 # params for ShiTomasi corner detection
 feature_params = dict(maxCorners=2000,
@@ -231,6 +232,7 @@ for i, row in enumerate(logreader):
         for dat in row:
             numrow.append(float(dat))
         data.append(numrow)
+file.close()
 
 # *** READ FILENAMES *** #
 imgdir = './data/images/flyover3'
@@ -275,21 +277,21 @@ for i, ts in enumerate(timestamps):
     pose.append([x, y, z])
     images.append(cv2.imread(filenames[i]))
 
+
+# *** VISUAL ODOMETRY *** #
+csv_file = open('path.csv', 'w')
 for frame_num, frame in enumerate(images):
     if prev_frame is None:
         prev_frame = cv2.resize(frame, dsize=(w, h))
         prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
         continue
 
-    print(frame_num)
-    # if frame_num > 40:
-    #     break
-
     frame = cv2.resize(frame, dsize=(w, h))
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     # select new keypoints
     old_points = find_features(prev_gray, feature_params, divisions=4)
+    print(len(old_points))
 
     new_points, status, error = cv2.calcOpticalFlowPyrLK(prev_gray, gray, old_points, None, **lk_params)
     old_points = old_points[status == 1]
@@ -323,7 +325,11 @@ for frame_num, frame in enumerate(images):
     speed = get_speed(delta)
     _, Tpos = update_motion(new_points, old_points, Rpos, Tpos, scale=speed)
 
+
     # draw path
+    gtx, gty, gtz = pose[frame_num]
+    tx, ty, tz = Tpos[:]
+    csv_file.write('{0:f}, {1:f}, {2:f}, {3:f}, {4:f}, {5:f}\n'.format(float(tx), float(ty), float(tz), gtx, gty, gtz))
     path.append(Tpos)
     canvas = draw_path(canvas, path, scale=0.6, clear=True, color=(0, 255, 0))
     canvas = draw_path(canvas, pose[0:frame_num],
@@ -342,7 +348,7 @@ for frame_num, frame in enumerate(images):
     cv2.imshow("Path", canvas)
 
     prev_gray = gray.copy()
-    key = cv2.waitKey(100) & 0xFF
+    key = cv2.waitKey(1) & 0xFF
 
     if key == ord("q"):
         break
@@ -357,3 +363,4 @@ print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
 # do a bit of cleanup
 cv2.waitKey(0)
 cv2.destroyAllWindows()
+csv_file.close()
