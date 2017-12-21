@@ -1,11 +1,60 @@
+##################################
+## tracking_logged_sequence.py ###
+##################################
+######### Copyright 2017 #########
+##################################
+####### Thomas T. Sørensen #######
+######## Hjalte B. Møller ########
+####### Mads Z. Mackeprang #######
+##################################
+##################################
+#  Does visual odometry from an  #
+#  image sequence. A log file    #
+#  containing ground truth data  #
+#  is required to get correct    #
+#  scale.                        #
+##################################
+
 import numpy as np
 import cv2
 from imutils.video import FPS
 import math
-import csv
 import glob
 from datetime import datetime
 import csv
+
+### CONFIG ###
+save_as = 'path.csv'  # filename of path
+logdir = './data/logs'
+log_filename = 'LOG171212_135705.csv'
+imgdir = './data/images/flyover3'
+img_filename = '*.bmp'  # image filename pattern. Use * followed by file extension
+# image dimensions
+h = 580
+w = 752
+
+min_features = 600
+
+# Parameters for lucas kanade optical flow
+lk_params = dict(winSize=(15, 15),
+                 maxLevel=2,
+                 criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
+
+# params for ShiTomasi corner detection
+feature_params = dict(maxCorners=2000,
+                      qualityLevel=0.01,
+                      minDistance=5,
+                      blockSize=3,
+                      useHarrisDetector=False,
+                      k=0.04)
+
+# calibrated camera parameters
+# obtained from calibrate_camera.py
+cam_mat = np.array([[1417.84363,   0.0,     353.360213],
+                       [0.0,    1469.27135, 270.122002],
+                       [0.0,       0.0,       1.0]], dtype=np.float32)
+dist_coeff = np.array((-0.422318028, 0.495478798, 0.00205497237, 0.0000627845968, -2.67925535), dtype=np.float32)
+##############
 
 
 def filename2unixtime(fn, houroffset=0):
@@ -47,48 +96,12 @@ def get_speed(mat):
     return speed
 
 
-def get_rotation(mat, axis=0):
-    if axis == 0:
-        v0 = np.array([[1.], [0.], [0.]], dtype=np.float32)
-    elif axis == 1:
-        v0 = np.array([[0.], [1.], [0.]], dtype=np.float32)
-    else:
-        v0 = np.array([[0.], [0.], [1.]], dtype=np.float32)
-
-    v1 = np.dot(mat, v0)
-    dot = np.vdot(v0, v1)
-    a = np.arccos(dot)
-    return a
-
-
 def draw_tracks(canvas, points1, points2):
     for i, (new, old) in enumerate(zip(points1, points2)):
         a, b = new.ravel()
         c, d = old.ravel()
         canvas = cv2.line(canvas, (a, b), (c, d), (0, 255, 0), 1)
     return canvas
-
-
-def get_mean_distance_2d(features1, features2):
-    num_features = min((len(features1), len(features2)))
-    features1 = np.reshape(features1, (num_features, 2))
-    features2 = np.reshape(features2, (num_features, 2))
-
-    features = zip(features1, features2)
-    n = 0
-    dist = 0
-    for f1, f2 in features:
-        dx = f1[0]-f2[0]
-        dy = f1[1]-f2[1]
-        d = math.sqrt(dx**2+dy**2)
-        dist += d
-        n += 1
-
-    if n == 0:
-        return 0
-
-    dist /= n
-    return dist
 
 
 def update_motion(points1, points2, Rp, Tp, scale=1.0):
@@ -98,7 +111,7 @@ def update_motion(points1, points2, Rp, Tp, scale=1.0):
                                    cameraMatrix=cam_mat, method=cv2.LMEDS, prob=0.999, threshold=1.0, mask=None)
     points, R, T, newmask = cv2.recoverPose(E, p1, p2, cameraMatrix=cam_mat, mask=mask)
 
-    Tp = Tp + np.dot(R, T)*scale
+    Tp = Tp + np.dot(Rp, T)*scale
     Rp = np.dot(R, Rp)
     return Rp, Tp
 
@@ -148,6 +161,7 @@ def draw_path(cnv, points, rotate=0,
 
 
 def find_features(img, params, divisions=2):
+    # divides image into sub images, finds features in each image and returns the features
     points = []
 
     dim = np.shape(img)
@@ -165,7 +179,7 @@ def find_features(img, params, divisions=2):
     for x in range(divisions):
         for y in range(divisions):
             partimg = gray[y*dh:(y+1)*dh, x*dw:(x+1)*dw]
-            partpoints = cv2.goodFeaturesToTrack(partimg, mask=None, **feature_params)
+            partpoints = cv2.goodFeaturesToTrack(partimg, mask=None, **params)
             partpoints = np.reshape(partpoints, (-1, 2))
             for i in range(len(partpoints)):
                 points.append([partpoints[i][0] + x * dw, partpoints[i][1] + y * dh])
@@ -176,33 +190,6 @@ def find_features(img, params, divisions=2):
 
 
 fps = FPS().start()
-
-# image dimensions
-h = 580
-w = 752
-
-min_features = 600
-
-canvas = np.zeros((h, w, 3), dtype=np.uint8)
-
-# calibrated camera parameters
-cam_mat = np.array([[1417.84363,   0.0,     353.360213],
-                       [0.0,    1469.27135, 270.122002],
-                       [0.0,       0.0,       1.0]], dtype=np.float32)
-dist_coeff = np.array((-0.422318028, 0.495478798, 0.00205497237, 0.0000627845968, -2.67925535), dtype=np.float32)
-
-# Parameters for lucas kanade optical flow
-lk_params = dict(winSize=(15, 15),
-                 maxLevel=2,
-                 criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
-
-# params for ShiTomasi corner detection
-feature_params = dict(maxCorners=2000,
-                      qualityLevel=0.01,
-                      minDistance=5,
-                      blockSize=3,
-                      useHarrisDetector=False,
-                      k=0.04)
 
 Rpos = np.eye(3, 3, dtype=np.float32)
 Tpos = np.zeros((3, 1), dtype=np.float32)
@@ -216,9 +203,7 @@ new_points = []
 path = []
 
 # *** READ LOG *** #
-logdir = './data/logs'
-filename = 'LOG171212_135705.csv'
-file = open('/'.join((logdir, filename)), 'r')
+file = open('/'.join((logdir, log_filename)), 'r')
 logreader = csv.reader(file, delimiter=' ')
 
 header = None
@@ -235,12 +220,10 @@ for i, row in enumerate(logreader):
 file.close()
 
 # *** READ FILENAMES *** #
-imgdir = './data/images/flyover3'
-filename = '*.bmp'
 images = []
 filenames = []
 timestamps = []
-filepath = ''.join((imgdir, '/', filename))
+filepath = ''.join((imgdir, '/', img_filename))
 for imgfile in glob.glob(filepath):
     filenames.append(imgfile)
 
@@ -275,11 +258,13 @@ for i, ts in enumerate(timestamps):
     y -= origin[1]
     z -= origin[2]
     pose.append([x, y, z])
-    images.append(cv2.imread(filenames[i]))
+    img = cv2.imread(filenames[i])
+    images.append(img)
 
 
 # *** VISUAL ODOMETRY *** #
-csv_file = open('path.csv', 'w')
+csv_file = open(save_as, 'w')
+canvas = np.zeros((h, w, 3), dtype=np.uint8)
 for frame_num, frame in enumerate(images):
     if prev_frame is None:
         prev_frame = cv2.resize(frame, dsize=(w, h))
@@ -291,7 +276,6 @@ for frame_num, frame in enumerate(images):
 
     # select new keypoints
     old_points = find_features(prev_gray, feature_params, divisions=4)
-    print(len(old_points))
 
     new_points, status, error = cv2.calcOpticalFlowPyrLK(prev_gray, gray, old_points, None, **lk_params)
     old_points = old_points[status == 1]
@@ -342,8 +326,6 @@ for frame_num, frame in enumerate(images):
     # draw tracks
     frame = draw_tracks(frame, old_points, new_points)
 
-    cv2.line(frame, (0, h // 2), (w, h // 2), (255, 0, 0), 1)
-    cv2.line(frame, (w // 2, 0), (w // 2, h), (255, 0, 0), 1)
     cv2.imshow("Frame", frame)
     cv2.imshow("Path", canvas)
 
