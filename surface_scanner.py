@@ -41,12 +41,16 @@ lk_params = dict(winSize=(15, 15),
                  criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
 
 # params for ShiTomasi corner detection
-feature_params = dict(maxCorners=2000,
+good_params = dict(maxCorners=2000,
                       qualityLevel=0.01,
                       minDistance=5,
                       blockSize=3,
                       useHarrisDetector=False,
                       k=0.04)
+# params for FAST detection
+fast_params = dict(threshold=15,
+                   nonmaxSuppression=True,
+                   type=cv2.FAST_FEATURE_DETECTOR_TYPE_7_12)
 
 # calibrated camera parameters
 # obtained from calibrate_camera.py
@@ -125,9 +129,10 @@ def draw_tracks(canvas, points1, points2, mask=None):
     return canvas
 
 
-def find_features(img, params, divisions=2):
+def find_features(img, params, divisions=2, method=0):
     # divides image into sub images, finds features in each image and returns the features
     points = []
+    fast = cv2.FastFeatureDetector_create(**fast_params)
 
     dim = np.shape(img)
 
@@ -144,7 +149,13 @@ def find_features(img, params, divisions=2):
     for x in range(divisions):
         for y in range(divisions):
             partimg = gray[y*dh:(y+1)*dh, x*dw:(x+1)*dw]
-            partpoints = cv2.goodFeaturesToTrack(partimg, mask=None, **params)
+            if method == 0:
+                partpoints = cv2.goodFeaturesToTrack(partimg, mask=None, **params)
+            else:
+                kp = fast.detect(img, None)
+                partpoints = np.zeros((len(kp), 2), dtype=np.float32)
+                for i, k in enumerate(kp):
+                    partpoints[i] = [k.pt[0], k.pt[1]]
             partpoints = np.reshape(partpoints, (-1, 2))
             for i in range(len(partpoints)):
                 points.append([partpoints[i][0] + x * dw, partpoints[i][1] + y * dh])
@@ -233,7 +244,7 @@ for frame_num, frame in enumerate(images):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     # select new keypoints
-    old_points = find_features(prev_gray, feature_params, divisions=4)
+    old_points = find_features(prev_gray, good_params, divisions=4)
 
     # track points
     new_points, status, error = cv2.calcOpticalFlowPyrLK(prev_gray, gray, old_points, None, **lk_params)
