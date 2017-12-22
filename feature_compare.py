@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import math
+import glob
 
 
 def find_features(img, method=0):
@@ -51,40 +52,83 @@ lk_params = dict(winSize=(15, 15),
                  criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
 
 # params for ShiTomasi corner detection
-good_params = dict(maxCorners=8000,
-                      qualityLevel=0.03,
+good_params = dict(maxCorners=2000,
+                      qualityLevel=0.01,
                       minDistance=5,
                       blockSize=3,
                       useHarrisDetector=False,
                       k=0.04)
 
-fast_params = dict(threshold=15,
+fast_params = dict(threshold=21,
                    nonmaxSuppression=True,
                    type=cv2.FAST_FEATURE_DETECTOR_TYPE_7_12)
 
-img1 = cv2.imread('./data/images/flyover3/C171212_13580358.bmp', 0)
-img2 = cv2.imread('./data/images/flyover3/C171212_13584265.bmp', 0)
+imgdir = './data/images/flyover3'
+img_filename = '*.bmp'  # image filename pattern. Use * followed by file extension
 
-m = 0
-points1, t1 = find_features(img1, method=m)
-points1 = np.reshape(points1, (-1, 1, 2))
-npoints1 = len(points1)
+# *** READ FILENAMES *** #
+images = []
+filenames = []
+timestamps = []
+filepath = ''.join((imgdir, '/', img_filename))
+for imgfile in glob.glob(filepath):
+    filenames.append(imgfile)
 
-print('Time taken for finding {} features using method {}: {}ms'.format(len(points1), m, t1 * 1000))
+filenames.sort()
 
-points2, status, error = cv2.calcOpticalFlowPyrLK(img1, img2, points1, None, **lk_params)
-points1 = points1[status == 1]
-points2 = points2[status == 1]
+for f in filenames:
+    images.append(cv2.imread(f, 0))
 
-points1, points2 = remove_outliers(points1, points2)
+h, w = np.shape(images[0])
 
-npoints2 = len(points2)
-print('{}, {}'.format(npoints1, npoints2))
-print('{0:.2f}%'.format(100*(npoints2/npoints1)))
+m = 1
 
-cv2.imshow('img', img1)
-cv2.waitKey(1000)
-cv2.imshow('img', img2)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
 
+prev_img = None
+n_points = 0
+total_time = 0
+inliers = 0
+n_img = len(images)
+for i, img in enumerate(images):
+    print('{0:.2f}%'.format(100*(i/n_img)))
+    if i == 0:
+        prev_img = np.copy(img)
+        continue
+
+    points1, t1 = find_features(prev_img, method=m)
+    points1 = np.reshape(points1, (-1, 1, 2))
+
+    total_time += t1
+    n_points += len(points1)
+
+    points2, status, error = cv2.calcOpticalFlowPyrLK(prev_img, img, points1, None, **lk_params)
+    points1 = points1[status == 1]
+    points2 = points2[status == 1]
+
+    points1, points2 = remove_outliers(points1, points2)
+    inliers += len(points2)
+
+    prev_img = np.copy(img)
+
+n_points /= n_img
+total_time /= n_img
+inliers /= n_img
+
+print('Method: {}'.format(m))
+print('Images: {}'.format(n_img))
+print('Avg. time taken: {}ms'.format(1000*total_time))
+print('Avg. features found: {} '.format(n_points))
+print('Avg. inliers: {} '.format(inliers))
+print('Avg. inliers %: {}% '.format(100*(inliers/n_points)))
+
+# composite = np.hstack((img1, img2))
+# composite = cv2.cvtColor(composite, cv2.COLOR_GRAY2BGR)
+# cv2.line(composite, (w, 0), (w, h), (0, 0, 0), 2)
+# for i, p1 in enumerate(points1):
+#     x1, y1 = p1
+#     x2, y2 = points2[i]
+#     x2 += w
+#     cv2.line(composite, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 1)
+# cv2.imshow('correspondences', composite)
+# cv2.waitKey(0)
+# cv2.destroyAllWindows()
